@@ -1,0 +1,588 @@
+import "./style.css";
+import {
+  addClass,
+  removeClass,
+  switchEles,
+  ArrayInsertItemBefore,
+  getEleIndex
+} from "./helper";
+
+interface IconSortConfig {
+  wrapperSelector: string;
+  iconSelector: string;
+  data: object[];
+}
+// eslint-disable-next-line
+function noop() {}
+
+type statusHold = "OFF" | "HOLDING" | "MOVING" | "HOMMING";
+type status = "OFF" | "ON" | "CHANGING";
+
+const status = {
+  OFF: "OFF",
+  ON: "ON",
+  CHANGING: "CHANGING"
+};
+
+const statusHold = {
+  OFF: "OFF",
+  HOLDING: "HOLDING",
+  MOVING: "MOVING",
+  HOMMING: "HOMMING"
+};
+
+export default class IconSort {
+  status: string;
+  statusHold: string;
+  dataHolding: {
+    timeCounter: NodeJS.Timeout | undefined;
+    holdingAppIndex: number;
+    holdingAppEle: HTMLElement | null;
+  };
+  dataMoving: {
+    grabbedAppIndex: number;
+    grabbedAppEle: HTMLElement | null;
+
+    moveStartX: number;
+    moveStartY: number;
+    hoverAppIndex: number;
+    movingX: number;
+    movingY: number;
+    moveDistanceX: number;
+    moveDistanceY: number;
+    moveDebounce: NodeJS.Timeout | undefined;
+  };
+  dataChanging: {
+    grabbedAppIndex: number;
+    targetAppIndex: number;
+    gap: number;
+    grabbedEle: HTMLElement | null;
+    targetEle: HTMLElement | null;
+    elesToSwitch: HTMLElement[];
+    transitionendCount: NodeJS.Timeout | undefined;
+  };
+  icons: HTMLElement[];
+  iconWidth: number;
+  iconHeight: number;
+  diameter: number;
+  diameterRate: number;
+  rows: number;
+  cols: number;
+  stepX: number;
+  stepY: number;
+  coordinates: { X: number; Y: number; index: number }[];
+
+  constructor({ wrapperSelector, data, iconSelector }: IconSortConfig) {
+    this.status = "OFF";
+    this.statusHold = "OFF";
+    this.dataHolding = {
+      timeCounter: undefined,
+      holdingAppIndex: -1,
+      holdingAppEle: null
+    };
+    this.dataMoving = {
+      grabbedAppIndex: -1,
+      grabbedAppEle: null,
+      moveStartX: -1,
+      moveStartY: -1,
+      moveDebounce: undefined,
+      //移动时候会变的
+      hoverAppIndex: -1,
+      movingX: -1,
+      movingY: -1,
+      moveDistanceX: -1,
+      moveDistanceY: -1
+    };
+    this.dataChanging = {
+      grabbedAppIndex: -1,
+      grabbedEle: null,
+      targetAppIndex: -1,
+      targetEle: null,
+      elesToSwitch: [],
+      gap: -1,
+      transitionendCount: undefined
+    };
+
+    const icons = document
+      .querySelector(wrapperSelector)
+      ?.querySelectorAll(iconSelector);
+    if (!icons) {
+      throw new Error();
+    } else {
+      this.icons = Array.from(icons) as HTMLElement[];
+      this.iconWidth = this.icons[0].offsetWidth;
+      this.iconHeight = this.icons[0].offsetHeight;
+    }
+    this.coordinates = [];
+    this.diameter = -1;
+    this.diameterRate = 1;
+    this.rows = -1;
+    this.cols = -1;
+    this.stepX = -1;
+    this.stepY = -1;
+
+    this.setIconsLocation();
+    this.setIconConfig();
+    this.addIconEvents();
+    console.log(this);
+  }
+  setIconsLocation(): void {
+    this.coordinates = this.icons.map((iconEle, index) => {
+      return {
+        index,
+        X: iconEle.offsetLeft + iconEle.offsetWidth / 2,
+        Y: iconEle.offsetTop + iconEle.offsetHeight / 2
+      };
+    });
+  }
+  setIconConfig(): void {
+    const iconEle = this.icons[0];
+    if (iconEle) {
+      this.diameter = this.iconWidth / 2;
+    }
+    this.coordinates.some((_, index, coordinates) => {
+      if (coordinates[index].Y !== coordinates[index + 1].Y) {
+        console.log(index);
+        this.cols = index + 1;
+        this.rows = Math.ceil(coordinates.length / this.cols);
+        this.stepX = coordinates[1].X - coordinates[0].X;
+        this.stepY =
+          this.rows > 1 ? coordinates[this.cols].Y - coordinates[0].Y : 0;
+        return true;
+      }
+    });
+  }
+  isStatusHold(status: string): boolean {
+    return this.statusHold === status;
+  }
+  turnStatusHold(status: string): void {
+    this.statusHold = status;
+  }
+  isStatus(status: string): boolean {
+    return this.status === status;
+  }
+  turnStatus(status: string): void {
+    this.status = status;
+  }
+  addIconEvents(): void {
+    this.icons.forEach(IconEle => {
+      this.addTouchStart(IconEle);
+      this.addTouchMove(IconEle);
+      this.addTransitionend(IconEle);
+      this.addTouchend(IconEle);
+    });
+  }
+  addTouchStart(IconEle: HTMLElement): void {
+    IconEle.addEventListener("touchstart", event => {
+      const e = event as TouchEvent;
+      console.time("touchstart");
+      if (this.isStatus(status.OFF) && this.isStatusHold(statusHold.OFF)) {
+        this.turnStatusHold(statusHold.HOLDING);
+        this.setHoldingApp(e);
+        this.countHoldTime(() => {
+          this.enlargeHoldIcon();
+          //grabIcon应该放到transitionend里面，但事件再这里
+          this.grabIcon(e);
+        });
+      }
+
+      if (this.isStatus(status.ON) && this.isStatusHold(statusHold.OFF)) {
+        e.preventDefault();
+        this.turnStatusHold(statusHold.HOLDING);
+        this.setHoldingApp(e);
+        setTimeout(() => {
+          this.enlargeHoldIcon();
+          this.grabIcon(e);
+        }, 20);
+      }
+    });
+  }
+  setHoldingApp(e: TouchEvent): void {
+    console.log("setHoldingApp");
+
+    this.dataHolding.holdingAppIndex = getEleIndex(
+      (e.target || e.srcElement) as HTMLElement
+    );
+    this.dataHolding.holdingAppEle = this.icons[
+      this.dataHolding.holdingAppIndex
+    ];
+    addClass(this.dataHolding.holdingAppEle as HTMLElement, "holding");
+  }
+  countHoldTime(callback: Function): void {
+    this.dataHolding.timeCounter = setTimeout(() => {
+      callback();
+    }, 700);
+  }
+  cancelHold(): void {
+    this.resetHoldingApp();
+    this.turnStatusHold(statusHold.OFF);
+    clearTimeout(this.dataHolding.timeCounter as NodeJS.Timeout);
+  }
+  grabIcon(e: TouchEvent): void {
+    this.dataMoving.grabbedAppIndex = this.dataHolding.holdingAppIndex;
+    this.dataMoving.grabbedAppEle = this.dataHolding.holdingAppEle;
+    this.dataMoving.moveStartX = e.touches[0].pageX;
+    this.dataMoving.moveStartY = e.touches[0].pageY;
+    console.timeEnd("touchstart");
+  }
+  enlargeHoldIcon(): void {
+    if (this.dataHolding.holdingAppEle) {
+      this.dataHolding.holdingAppEle.style.transform =
+        "translateX(0px) translateY(0px)  scale(1.1)  translateZ(0px)";
+    }
+  }
+  addTouchMove(IconEle: HTMLElement): void {
+    //off的时候要保持原生的滚动效果,才能滚动应用
+    IconEle.addEventListener("touchmove", (e: TouchEvent) => {
+      //按住不足一秒时移动位置
+      if (this.isStatusHold(statusHold.HOLDING)) {
+        e.preventDefault();
+        this.cancelHold();
+        return;
+      }
+      if (this.isStatusHold(statusHold.MOVING) && this.isStatus(status.ON)) {
+        e.stopPropagation();
+        e.preventDefault();
+        this.moveAppTransform(e);
+        //这里要判断被抓去的图标和别的图标距离多远
+        clearTimeout(this.dataMoving.moveDebounce as NodeJS.Timeout);
+        this.dataMoving.moveDebounce = setTimeout(() => {
+          console.log("这里在寻找");
+
+          this.findHoveringApp();
+        }, 50);
+        return;
+      }
+      if (this.isStatus(status.CHANGING)) {
+        e.stopPropagation();
+        e.preventDefault();
+        this.moveAppTransform(e);
+
+        console.log("正在改变");
+      }
+    });
+    //holding状态时候改成
+  }
+  resetHoldingApp(): void {
+    console.log("resetHoldingApp");
+    //setHoldingApp ,为放大的动画添加类名
+    (this.dataHolding.holdingAppEle as HTMLElement).style.transform = "";
+    removeClass(this.dataHolding.holdingAppEle as HTMLElement, "holding");
+    this.dataHolding.holdingAppIndex = -1;
+    this.dataHolding.holdingAppEle = null;
+  }
+  moveAppTransform(e: TouchEvent): void {
+    const app = this.dataMoving.grabbedAppEle as HTMLElement;
+    this.dataMoving.movingX = e.touches[0].pageX;
+    this.dataMoving.movingY = e.touches[0].pageY;
+
+    this.dataMoving.moveDistanceX =
+      this.dataMoving.movingX - this.dataMoving.moveStartX;
+    this.dataMoving.moveDistanceY =
+      this.dataMoving.movingY - this.dataMoving.moveStartY;
+    app.style.transform =
+      "translateX(" +
+      this.dataMoving.moveDistanceX +
+      "px) translateY(" +
+      this.dataMoving.moveDistanceY +
+      "px)  scale(1.1) translateZ(0px)";
+  }
+  findHoveringApp(): void {
+    const grabbedIconCoordinate = this.coordinates[
+      this.dataMoving.grabbedAppIndex
+    ];
+    const movingApp = {
+      X: grabbedIconCoordinate.X + this.dataMoving.moveDistanceX,
+      Y: grabbedIconCoordinate.Y + this.dataMoving.moveDistanceY
+    };
+    /*  console.log(movingApp); */
+
+    this.dataMoving.hoverAppIndex = -1;
+    for (let index = 0; index < this.icons.length; index++) {
+      const appLoc = this.coordinates[index];
+      const sumDistance =
+        Math.sqrt(
+          Math.pow((appLoc.X | 0) - (movingApp.X | 0), 2) +
+            Math.pow((appLoc.Y | 0) - (movingApp.Y | 0), 2)
+        ) | 0;
+      console.log(appLoc);
+      console.log(sumDistance);
+
+      //不是自己, 并且和别的应用靠得很近
+      if (
+        this.dataMoving.grabbedAppIndex !== index &&
+        sumDistance < this.diameter * this.diameterRate
+      ) {
+        this.dataMoving.hoverAppIndex = index;
+        console.log(index);
+        this.turnStatus(status.CHANGING);
+        /*  console.log(this); */
+        this.findElementToSwitch();
+        this.elementsSwitch();
+        break;
+      }
+    }
+  }
+  findElementToSwitch(): void {
+    this.dataChanging.grabbedAppIndex = this.dataMoving.grabbedAppIndex;
+    this.dataChanging.targetAppIndex = this.dataMoving.hoverAppIndex;
+    this.dataChanging.gap =
+      this.dataChanging.targetAppIndex - this.dataChanging.grabbedAppIndex;
+
+    this.dataChanging.grabbedEle = this.icons[
+      this.dataChanging.grabbedAppIndex
+    ];
+    this.dataChanging.targetEle = this.icons[this.dataChanging.targetAppIndex];
+  }
+  elementsSwitch(): void {
+    const forward = this.dataChanging.gap > 0;
+    const grabbedIndex = this.dataChanging.grabbedAppIndex;
+    const targetAppIndex = this.dataChanging.targetAppIndex;
+    const startIndex = forward ? grabbedIndex + 1 : targetAppIndex;
+    const endIndex = forward ? targetAppIndex + 1 : grabbedIndex;
+    const elesToSwitch = (this.dataChanging.elesToSwitch = this.icons.slice(
+      startIndex,
+      endIndex
+    ));
+    console.log(elesToSwitch);
+    elesToSwitch.forEach(ele => {
+      addClass(ele, "changing");
+    });
+    elesToSwitch.forEach((ele, index) => {
+      //判断出行数和列数有多少个，可以
+      console.time(1);
+      let stepEleTransX: number, stepEleTransY: number;
+      if (forward) {
+        const isEdge = (startIndex + index) % this.cols === 0;
+        if (isEdge) {
+          stepEleTransX = this.stepX * (this.cols - 1);
+          stepEleTransY = -this.stepY;
+        } else {
+          stepEleTransX = -this.stepX;
+          stepEleTransY = 0;
+        }
+      } else {
+        const isEdge = (startIndex + index + 1) % this.cols === 0;
+        if (isEdge) {
+          stepEleTransX = -this.stepX * (this.cols - 1);
+          stepEleTransY = this.stepY;
+        } else {
+          stepEleTransX = this.stepX;
+          stepEleTransY = 0;
+        }
+      }
+      console.timeEnd(1);
+      console.time("2");
+      const stepEleTransX1 =
+          this.coordinates[startIndex + index - (forward ? 1 : -1)].X -
+          this.coordinates[startIndex + index].X,
+        stepEleTransY1 =
+          this.coordinates[startIndex + index - (forward ? 1 : -1)].Y -
+          this.coordinates[startIndex + index].Y;
+      console.timeEnd("2");
+      console.log(stepEleTransX, stepEleTransY);
+      console.log(stepEleTransX1, stepEleTransY1);
+      //  return;
+      setTimeout(() => {
+        ele.style.transform =
+          "translateX(" +
+          stepEleTransX +
+          "px) translateY( " +
+          stepEleTransY +
+          "px)  translateZ(0px)";
+      }, 20); //10毫秒i的画会出问题
+    });
+  }
+  addTransitionend(IconEle: HTMLElement): void {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    IconEle.addEventListener("transitionend", event => {
+      clearTimeout(this.dataChanging.transitionendCount as NodeJS.Timeout);
+      this.dataChanging.transitionendCount = setTimeout(() => {
+        console.log("transitionend");
+        //长按时放大图标,改变状态到on 和 moving
+        if (
+          this.isStatus(status.OFF) &&
+          this.isStatusHold(statusHold.HOLDING)
+        ) {
+          this.turnStatusHold(statusHold.MOVING);
+          removeClass(this.dataHolding.holdingAppEle as HTMLElement, "holding");
+          this.dataHolding.holdingAppIndex = -1;
+          this.dataHolding.holdingAppEle = null;
+          addClass(this.dataMoving.grabbedAppEle as HTMLElement, "grabbed");
+          this.turnStatus(status.ON);
+          this.icons.forEach((ele, index) => {
+            addClass(ele, "on" + (index % 3));
+          });
+          return;
+        }
+        //已经是on了, 长按hold
+        if (this.isStatus(status.ON) && this.isStatusHold(statusHold.HOLDING)) {
+          this.turnStatusHold(statusHold.MOVING);
+          removeClass(this.dataHolding.holdingAppEle as HTMLElement, "holding");
+          this.dataHolding.holdingAppIndex = -1;
+          this.dataHolding.holdingAppEle = null;
+          addClass(this.dataMoving.grabbedAppEle as HTMLElement, "grabbed");
+          console.log("this.isStatus(status.ON)");
+        }
+        //status正在changing, hold正在moving
+        if (
+          this.isStatus(
+            status.CHANGING
+          ) /* &&
+          this.isStatusHold(statusHold.MOVING) */
+        ) {
+          console.log("调换阶段");
+          setTimeout(() => {
+            this.resetChangingView();
+          }, 20);
+        }
+        if (this.isStatus(status.ON) && this.isStatusHold(statusHold.HOMMING)) {
+          console.log("回归");
+          removeClass(this.dataMoving.grabbedAppEle as HTMLElement, "changing");
+          this.dataMoving.grabbedAppEle = null;
+          this.turnStatusHold(statusHold.OFF);
+        }
+        console.log("last one");
+        console.log(event);
+        console.log(this);
+        console.log(this.dataChanging.gap);
+      }, 50); //debounce时间不饿能太短，因为有时候浏览器不只负责js运行
+    });
+  }
+  resetChangingView(): void {
+    console.log("resetchangingview");
+
+    const forward = this.dataChanging.gap > 0;
+    const grabbedEle = this.dataChanging.grabbedEle as HTMLElement;
+    switchEles(
+      grabbedEle,
+      this.icons[this.dataChanging.targetAppIndex],
+      forward
+    );
+    this.setGrabbedAppTransform();
+    this.dataChanging.elesToSwitch.forEach(ele => {
+      removeClass(ele, "changing");
+      ele.style.transform = "";
+    });
+    this.resetIconEles();
+    this.resetMovingStatus();
+    this.resetChangeStatus();
+    this.turnStatus(status.ON);
+    console.log(this.statusHold);
+
+    setTimeout(() => {
+      if (this.isStatusHold(statusHold.HOMMING)) {
+        removeClass(this.dataMoving.grabbedAppEle as HTMLElement, "grabbed");
+        addClass(this.dataMoving.grabbedAppEle as HTMLElement, "changing");
+        /*  setTimeout(() => { */
+        if (this.dataMoving.grabbedAppEle) {
+          this.dataMoving.grabbedAppEle.style.transform = "";
+        }
+        console.log("480清空");
+
+        this.dataMoving.grabbedAppIndex = -1;
+        this.dataMoving.moveStartX = -1;
+        this.dataMoving.moveStartY = -1;
+        this.dataMoving.movingX = -1;
+        this.dataMoving.movingY = -1;
+        this.dataMoving.moveDistanceX = -1;
+        this.dataMoving.moveDistanceY = -1;
+        /* }, 10); */
+        return;
+      }
+      this.findHoveringApp();
+    }, 30);
+    console.log(this);
+  }
+  setGrabbedAppTransform(): void {
+    const switchX =
+      this.coordinates[this.dataChanging.targetAppIndex].X -
+      this.coordinates[this.dataChanging.grabbedAppIndex].X;
+    const switchY =
+      this.coordinates[this.dataChanging.targetAppIndex].Y -
+      this.coordinates[this.dataChanging.grabbedAppIndex].Y;
+    console.log(switchX, switchY);
+    /// this.dataChanging.grabbedAppIndex;
+    this.dataMoving.moveStartX += switchX;
+    this.dataMoving.moveStartY += switchY;
+
+    this.dataMoving.moveDistanceX -= switchX;
+    this.dataMoving.moveDistanceY -= switchY;
+    (this.dataChanging.grabbedEle as HTMLElement).style.transform =
+      "translateX(" +
+      this.dataMoving.moveDistanceX +
+      "px) translateY(" +
+      this.dataMoving.moveDistanceY +
+      "px)  scale(1.1)  translateZ(0px)";
+  }
+  resetIconEles(): void {
+    this.icons = ArrayInsertItemBefore(
+      this.icons,
+      this.dataChanging.grabbedAppIndex,
+      this.dataChanging.targetAppIndex
+    ) as HTMLElement[];
+  }
+  resetChangeStatus(): void {
+    console.log("525清空");
+
+    this.dataChanging.grabbedAppIndex = -1;
+    this.dataChanging.targetAppIndex = -1;
+    this.dataChanging.gap = -1;
+    this.dataChanging.grabbedEle = null;
+    this.dataChanging.targetEle = null;
+    this.dataChanging.elesToSwitch = [];
+    this.dataChanging.transitionendCount = undefined;
+  }
+  resetMovingStatus(): void {
+    this.dataMoving.grabbedAppIndex = this.dataChanging.targetAppIndex;
+    this.dataMoving.hoverAppIndex = -1;
+  }
+  addTouchend(IconEle: HTMLElement): void {
+    IconEle.addEventListener("touchend", event => {
+      console.log("touchend");
+      console.time("touchend");
+      //todo on changing 的情况还没处理
+
+      if (this.isStatusHold(statusHold.MOVING) /* &&  */) {
+        //按住的情况要重置
+        console.log("HOMMING");
+        this.turnStatusHold(statusHold.HOMMING);
+        //如果有这个，会触发
+        clearTimeout(this.dataMoving.moveDebounce as NodeJS.Timeout);
+
+        if (this.isStatus(status.CHANGING)) {
+          console.log("松开点击时,正在调换");
+        }
+        if (this.isStatus(status.ON)) {
+          removeClass(this.dataMoving.grabbedAppEle as HTMLElement, "grabbed");
+          addClass(this.dataMoving.grabbedAppEle as HTMLElement, "changing");
+          /*   setTimeout(() => { */
+          //触发transition
+          if (this.dataMoving.grabbedAppEle) {
+            this.dataMoving.grabbedAppEle.style.transform = "";
+          }
+          console.log("564清空");
+
+          this.dataMoving.grabbedAppIndex = -1;
+          this.dataMoving.moveStartX = -1;
+          this.dataMoving.moveStartY = -1;
+          this.dataMoving.movingX = -1;
+          this.dataMoving.movingY = -1;
+          this.dataMoving.moveDistanceX = -1;
+          this.dataMoving.moveDistanceY = -1;
+          /*   }, 10); */
+        }
+        console.timeEnd("touchend");
+
+        return;
+      }
+      if (this.isStatus(status.OFF) && this.isStatusHold(statusHold.OFF))
+        return;
+      if (this.isStatusHold(statusHold.HOLDING)) {
+        console.log("cancelHold");
+        this.cancelHold();
+        return;
+      }
+    });
+  }
+}
