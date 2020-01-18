@@ -59,7 +59,7 @@ export default class IconSort {
     grabbedEle: HTMLElement | null;
     targetEle: HTMLElement | null;
     elesToSwitch: HTMLElement[];
-    transitionendCount: NodeJS.Timeout | undefined;
+    transitionendDebounce: NodeJS.Timeout | undefined;
   };
   icons: HTMLElement[];
   iconWidth: number;
@@ -100,7 +100,7 @@ export default class IconSort {
       targetEle: null,
       elesToSwitch: [],
       gap: -1,
-      transitionendCount: undefined
+      transitionendDebounce: undefined
     };
 
     const icons = document
@@ -246,7 +246,7 @@ export default class IconSort {
           console.log("这里在寻找");
 
           this.findHoveringIcon();
-        }, 50);
+        }, 20);
         return;
       }
       if (this.isStatus(status.CHANGING)) {
@@ -299,30 +299,35 @@ export default class IconSort {
     /*  console.log(movingIcon); */
 
     this.dataMoving.hoverIconIndex = -1;
-    for (let index = 0; index < this.icons.length; index++) {
+    console.time("test");
+
+    for (let index = 0, len = this.icons.length; index < len; index++) {
+      if (this.dataMoving.grabbedIconIndex === index) continue;
+
       const iconLoc = this.coordinates[index];
       const sumDistance =
         Math.sqrt(
           Math.pow((iconLoc.X | 0) - (movingIcon.X | 0), 2) +
             Math.pow((iconLoc.Y | 0) - (movingIcon.Y | 0), 2)
         ) | 0;
+
       console.log(iconLoc);
       console.log(sumDistance);
 
       //不是自己, 并且和别的应用靠得很近
-      if (
-        this.dataMoving.grabbedIconIndex !== index &&
-        sumDistance < this.diameter * this.diameterRate
-      ) {
+      if (sumDistance < this.diameter * this.diameterRate) {
         this.dataMoving.hoverIconIndex = index;
         console.log(index);
         this.turnStatus(status.CHANGING);
         /*  console.log(this); */
         this.findElementToSwitch();
+
         this.elementsSwitch();
+
         break;
       }
     }
+    console.timeEnd("test");
   }
   findElementToSwitch(): void {
     this.dataChanging.grabbedIconIndex = this.dataMoving.grabbedIconIndex;
@@ -351,7 +356,7 @@ export default class IconSort {
     });
     elesToSwitch.forEach((ele, index) => {
       //判断出行数和列数有多少个，可以
-      console.time("1");
+      /*  console.time("1");
       let stepEleTransX: number, stepEleTransY: number;
       if (forward) {
         const isEdge = (startIndex + index) % this.cols === 0;
@@ -372,17 +377,17 @@ export default class IconSort {
           stepEleTransY = 0;
         }
       }
-      console.timeEnd("1");
+      console.timeEnd("1"); */
       console.time("2");
-      const stepEleTransX1 =
+      const stepEleTransX =
           this.coordinates[startIndex + index - (forward ? 1 : -1)].X -
           this.coordinates[startIndex + index].X,
-        stepEleTransY1 =
+        stepEleTransY =
           this.coordinates[startIndex + index - (forward ? 1 : -1)].Y -
           this.coordinates[startIndex + index].Y;
       console.timeEnd("2");
       console.log(stepEleTransX, stepEleTransY);
-      console.log(stepEleTransX1, stepEleTransY1);
+      // console.log(stepEleTransX1, stepEleTransY1);
       //  return;
       setTimeout(() => {
         ele.style.transform =
@@ -397,8 +402,8 @@ export default class IconSort {
   addTransitionend(IconEle: HTMLElement): void {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     IconEle.addEventListener("transitionend", event => {
-      clearTimeout(this.dataChanging.transitionendCount as NodeJS.Timeout);
-      this.dataChanging.transitionendCount = setTimeout(() => {
+      clearTimeout(this.dataChanging.transitionendDebounce as NodeJS.Timeout);
+      this.dataChanging.transitionendDebounce = setTimeout(() => {
         console.log("transitionend");
         //长按时放大图标,改变状态到on 和 moving
         if (
@@ -541,7 +546,7 @@ export default class IconSort {
     this.dataChanging.grabbedEle = null;
     this.dataChanging.targetEle = null;
     this.dataChanging.elesToSwitch = [];
-    this.dataChanging.transitionendCount = undefined;
+    this.dataChanging.transitionendDebounce = undefined;
   }
   resetMovingStatus(): void {
     this.dataMoving.grabbedIconIndex = this.dataChanging.targetIconIndex;

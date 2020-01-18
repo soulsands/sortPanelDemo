@@ -163,7 +163,6 @@ li {
       -ms-user-select: none;
           user-select: none;
   /*  transform: all 1s; */
-  will-change: transform;
 }
 #wrapper li:active {
   opacity: 0.6;
