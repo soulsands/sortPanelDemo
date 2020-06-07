@@ -4,7 +4,7 @@ import {
   removeClass,
   switchEles,
   ArrayInsertItemBefore,
-  getEleIndex
+  getEleIndex,
 } from "./helper";
 
 interface IconSortConfig {
@@ -21,16 +21,17 @@ type status = "OFF" | "ON" | "CHANGING";
 const status = {
   OFF: "OFF",
   ON: "ON",
-  CHANGING: "CHANGING"
+  CHANGING: "CHANGING",
 };
 
 const statusHold = {
   OFF: "OFF",
   HOLDING: "HOLDING",
   MOVING: "MOVING",
-  HOMMING: "HOMMING"
+  HOMMING: "HOMMING",
 };
 
+console.log(process.env);
 export default class IconSort {
   status: string;
   statusHold: string;
@@ -78,7 +79,7 @@ export default class IconSort {
     this.dataHolding = {
       timeCounter: undefined,
       holdingIconIndex: -1,
-      holdingIconEle: null
+      holdingIconEle: null,
     };
     this.dataMoving = {
       grabbedIconIndex: -1,
@@ -91,7 +92,7 @@ export default class IconSort {
       movingX: -1,
       movingY: -1,
       moveDistanceX: -1,
-      moveDistanceY: -1
+      moveDistanceY: -1,
     };
     this.dataChanging = {
       grabbedIconIndex: -1,
@@ -100,7 +101,7 @@ export default class IconSort {
       targetEle: null,
       elesToSwitch: [],
       gap: -1,
-      transitionendDebounce: undefined
+      transitionendDebounce: undefined,
     };
 
     const icons = document
@@ -131,7 +132,7 @@ export default class IconSort {
       return {
         index,
         X: iconEle.offsetLeft + iconEle.offsetWidth / 2,
-        Y: iconEle.offsetTop + iconEle.offsetHeight / 2
+        Y: iconEle.offsetTop + iconEle.offsetHeight / 2,
       };
     });
   }
@@ -165,7 +166,7 @@ export default class IconSort {
     this.status = status;
   }
   addIconEvents(): void {
-    this.icons.forEach(IconEle => {
+    this.icons.forEach((IconEle) => {
       this.addTouchStart(IconEle);
       this.addTouchMove(IconEle);
       this.addTransitionend(IconEle);
@@ -173,7 +174,7 @@ export default class IconSort {
     });
   }
   addTouchStart(IconEle: HTMLElement): void {
-    IconEle.addEventListener("touchstart", event => {
+    IconEle.addEventListener("touchstart", (event) => {
       const e = event as TouchEvent;
       console.time("touchstart");
       if (this.isStatus(status.OFF) && this.isStatusHold(statusHold.OFF)) {
@@ -294,7 +295,7 @@ export default class IconSort {
     ];
     const movingIcon = {
       X: grabbedIconCoordinate.X + this.dataMoving.moveDistanceX,
-      Y: grabbedIconCoordinate.Y + this.dataMoving.moveDistanceY
+      Y: grabbedIconCoordinate.Y + this.dataMoving.moveDistanceY,
     };
     /*  console.log(movingIcon); */
 
@@ -351,7 +352,7 @@ export default class IconSort {
       endIndex
     ));
     console.log(elesToSwitch);
-    elesToSwitch.forEach(ele => {
+    elesToSwitch.forEach((ele) => {
       addClass(ele, "changing");
     });
     elesToSwitch.forEach((ele, index) => {
@@ -401,7 +402,7 @@ export default class IconSort {
   }
   addTransitionend(IconEle: HTMLElement): void {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
-    IconEle.addEventListener("transitionend", event => {
+    IconEle.addEventListener("transitionend", (event) => {
       clearTimeout(this.dataChanging.transitionendDebounce as NodeJS.Timeout);
       this.dataChanging.transitionendDebounce = setTimeout(() => {
         console.log("transitionend");
@@ -475,7 +476,7 @@ export default class IconSort {
       forward
     );
     this.setGrabbedIconTransform();
-    this.dataChanging.elesToSwitch.forEach(ele => {
+    this.dataChanging.elesToSwitch.forEach((ele) => {
       removeClass(ele, "changing");
       ele.style.transform = "";
     });
@@ -553,7 +554,7 @@ export default class IconSort {
     this.dataMoving.hoverIconIndex = -1;
   }
   addTouchend(IconEle: HTMLElement): void {
-    IconEle.addEventListener("touchend", event => {
+    IconEle.addEventListener("touchend", (event) => {
       console.log("touchend");
       console.time("touchend");
       //todo on changing 的情况还没处理
